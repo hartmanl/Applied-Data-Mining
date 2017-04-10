@@ -1,0 +1,134 @@
+---
+title: "Book Displays"
+author: "Lauren"
+date: "4/9/2017"
+output: html_document
+---
+# The Scenario
+A Manager at a fictitious bookstore, Flourish and Botts, wishes for me to give him suggestions on book displays. He gave me a dataset containing "shopping baskets" which lists different sale transactions. Firstly, the manager wants to know which books are the top sellers. Secondly, he wants to know which books should be put on a display aimed at book club members. Lastly, the manager wants to know what other books should be included in the display cases. 
+
+# Obtaining the Data
+The dataset given to me by the manager contains 90,000+ historical sales transations. When I am pulling the data into RStudio, I need to specify the format and state how the information in each of the columns are seperated. I also want to only look at information in the 'userid' and 'title' columns. Lastly, I wish to remove duplicate entries for the same user. The arules package is how R knows how to correctly run an Apriori algorithm.
+```{r}
+options(scipen=999) # actually lists out exponential values
+library(arules) 
+bookbaskets <- read.transactions("/Users/laurenhartman/Documents/bookdata.csv", format="single", sep="\t",                    cols=c("userid", "title"), rm.duplicates=T)       	
+```
+
+![Wild Animus](https://images-na.ssl-images-amazon.com/images/I/51Z39JNMDFL._SX415_BO1,204,203,200_.jpg)
+
+# Exploratory Data Analysis
+Below I looked at five transactions in the dataset.
+```{r}
+inspect(bookbaskets[1:5]) 
+```
+
+The code below calculates the number of books purchased by a user (userID).
+```{r}
+basketSizes<-size(bookbaskets) 
+```
+
+Next I calculated the relative support for each book title. Relative support is refering to how many times a book title appears in each shopping cart. 
+```{r}
+bookFreq<-itemFrequency(bookbaskets) 
+```
+
+Below is the calculation of absolute support for each book title. Absolute support is refering to the number of total purchases for each item.
+```{r}
+bookCount <- (bookFreq/sum(bookFreq))*sum(basketSizes) 
+```
+
+Next, I will only keep the sales transactions where more than one book was purchased. The algortihm which will be used will recommend books to customers based on books already in their shopping cart. The algorithm uses the historical transactions to  calculate how many times two or more books appear with each other in a shopping cart. 
+```{r}
+bookbasket_use<-bookbaskets[basketSizes>1] 
+
+bookbasket_use
+```
+
+Important information about the dataset can be derived. The mean indicates a customer, on average, will purchase eleven books per transaction. Element refers to how many transactions only had one book purchased, had only two books purchased, and so on.
+```{r}
+summary(bookbaskets)
+```
+
+Five transactions are examined, then the relative and absolute supports are calcuated for each transaction.
+```{r}
+inspect(bookbaskets[1:5])
+
+bookFreq <- itemFrequency(bookbaskets) # relative support
+head(bookFreq, 5)
+
+bookCount <- itemFrequency(bookbaskets, type = "absolute") # absolute support
+head(bookCount, 5)
+```
+As is shown, Apple Magic has a relative support of .000011 and an absolute support of one. In simpler terms, Apple Magic appeared in .0011% of the transactions and was purchased only once.
+
+An important factor to determining which books should be recommended to a customer is lift. Lift determines how much more likely a book is to be purchased based on historical purchases surrounding books already in the shopping cart. In simpler terms, if a book in a customer's shopping cart has, in the past, been bought with these other books, why not recommend one of these other books to a customer now?
+
+The apriori algorithm works similar to how the recommendation engine works on Amazon. Based on items you are considering, the algorithm will suggest other items for purchase in which the algorithm believes you will like. The algorithm will show a minimum of two suggestions but no more then ten suggestions. The suggestions with the highest lift will be shown first. I only want the algorithm to show suggestions which have a support of at least .05% and a confidence of at least 50%. Confidence refers to how often the customer actually purchased a book based on showing interest in another book. For example, of those who purchased The Last Battle, 80% went on to buy The Silver Chair as well. This makes sense since these two books are part of the same book series.
+```{r}
+bookrules <- apriori(bookbaskets, parameter = list(supp = .0005, confidence = .5, minlen = 2, maxlen = 10))
+
+bookrules_sort <- sort(bookrules, by = c("lift"))
+bookrules_df <- as(bookrules_sort, "data.frame")
+
+inspect(bookrules[1:10])
+```
+
+# Top Hits
+The manager wanted to know which books sold the most. The following plot list out the top twenty book titles. The plot lists out the percentage of shopping carts each book appeared in. To his horror, the suspect Wild Animus was the top seller. See
+[Wild Animus](https://litreactor.com/columns/what-the-hell-is-wild-animus)
+```{r}
+itemFrequencyPlot(bookbaskets, topN = 25) 
+```
+
+# Book Club Recommendations
+[Oprah Book Club](https://static.oprah.com/images/o2/201608/201608-obc-complete-list-01a.pdf)
+The second request fromt he manager was to give book recommendations for a book display aimed at book club members. He gave me the link above to determine what book titles are popular with book club members. I had my Apriori algorithm look for associations between the book club books and books which were commonly purchased along side them. I sorted the associations based on highest lift. I limited the number of assocations to twenty or less.
+```{r}
+oprah_book_club <-url("https://static.oprah.com/images/o2/201608/201608-obc-complete-list-01a.pdf")
+
+oprah_list <-subset(bookrules, lhs %in% c("House of Sand and Fog", "She's Come Undone", "White Oleander : A Novel", "The Pilot's Wife : A Novel"))
+
+oprah_list_sort <- sort (oprah_list, by = c("lift"))
+
+inspect(oprah_list_sort[1:20])
+```
+According to the algorithm, the book club members would like the Shopaholic series by Sophia Kinsella, certain titles from the Stephanie Plum Novel series by Janet Evanovich, and of course other books listed as an Oprah Book Club book. 
+
+# Suggestions to the Manager
+The following code brings up a "table" which suggests a book title based on books in a customers' shopping cart. Since the manager is adament about me not suggesting Wild Animus, I excluded this book title as a potential suggestion. The resulting table is exported into another tab since it is too big to fit into this document.
+```{r}
+bookres <- bookrules_df[!grepl("Wild Animus", bookrules_df$rules),]
+bookres_df <- as(bookres, "data.frame")
+head(bookres_df, 10)
+```
+
+The manager also does not want me to suggest books in the same series. Additional research is required to verify whether the books and the suggested book belong to the same series (Google and Amazon are your best friends for this). Based on the table the above code produces, I found two book titles which are neither written by the same author or fall under the same genre. I then plugged these two books in to obtain a suggestion list based on these two books. Based on the following result, I would tell the manager to display Angels and Demons and The Snow Falling on Cedars with The Secret Life of Bees[8]. According to the algorithm, customers who buy Angels and Demons and The Snow Falling on Cedars are about 62 times more likely to buy The Secret Life of Bees. The algorithm is predicted to be correct about this once out of every two times. The real charm of the Apriori algorithm is its ability to suggests books which have no obvious association with each other.
+```{r}
+other_list <-subset(bookrules, lhs %in% c("Angels &amp; Demons"))
+
+inspect(other_list)
+```
+
+Based on the table, I was able to find books written by the same author but which are not part of a series. I wanted to see what other books by John Grisham would be suggested based on having A Time to Kill in a shopping cart. I would suggest Time to Kill, The Street Lawyer, and The Chamber by John Grisham[50] be displayed. In this particular example, customers are 109 times more likely to buy The Chamber if they are buying Time To Kill and The Street Lawyer. The algorithm is correct about this about 59% of the time. In general, if a customer likes a book from an author, they are likely to buy other books by the same author.
+```{r}
+other_list2 <-subset(bookrules, lhs %in% c("A Time to Kill"))
+
+inspect(other_list2[1:60])
+```
+
+Not suprisingly, books in the same genre go well together. I wanted suggestions based on having Midwives: A Novel in a shopping cart. According to the Apriori algorithm, a customer who has both Midwives: A Novel and The Reader in a shopping cart are 103 times more likely to buy The Pilot's Wife: A Novel[2]. The algorithm is correct on this suggestion 64% of the time.
+```{r}
+other_list3 <-subset(bookrules, lhs %in% c("Midwives: A Novel"))
+
+inspect(other_list3[1:20])
+```
+
+
+
+
+
+
+
+
+
